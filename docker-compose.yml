@@ -1,0 +1,118 @@
+services:
+  porto-unsafe-app:
+    build:
+      context: .
+    image: porto-unsafe-app
+    container_name: porto-unsafe-app
+    volumes:
+      - .:/var/www
+    ports:
+      - "8000:8000"
+    depends_on:
+      porto-unsafe-db:
+        condition: service_healthy
+      porto-unsafe-redis:
+        condition: service_healthy
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: porto-unsafe-db
+      DB_PORT: 5432
+      DB_DATABASE: porto-unsafe
+      DB_USERNAME: root
+      DB_PASSWORD: root
+
+      QUEUE_CONNECTION: redis
+
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      SESSION_CONNECTION: default
+
+      REDIS_HOST: porto-unsafe-redis
+      REDIS_PORT: 6379
+    networks:
+      - porto-unsafe-network
+
+  porto-unsafe-db:
+    build: 
+      dockerfile: docker/postgres.Dockerfile
+      context: .
+    image: postgres.local:18
+    container_name: porto-unsafe-db
+    restart: no
+    environment:
+      POSTGRES_DB: porto-unsafe
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+    ports:
+      - "5432:5432"
+    volumes:
+      - porto-unsafe-db-data:/var/lib/postgresql/data
+    networks:
+      - porto-unsafe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U root -d porto-unsafe"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  porto-unsafe-redis:
+    build:
+      dockerfile: docker/redis.Dockerfile
+      context: .
+    image: redis.local:8
+    container_name: porto-unsafe-redis
+    restart: no
+    hostname: dev
+    ports:
+      - "6379:6379"
+    networks:
+      - porto-unsafe-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --raw incr ping || exit 1"]
+      interval: 10s
+      retries: 5
+      timeout: 10s
+      start_period: 15s
+
+  porto-unsafe-worker:
+    build:
+      context: .
+    image: porto-unsafe-app
+    container_name: porto-unsafe-worker
+    command: ["php", "artisan", "queue:work", "redis", "--sleep=3", "--tries=3"]
+    volumes:
+      - .:/var/www
+    depends_on:
+      porto-unsafe-db:
+        condition: service_healthy
+      porto-unsafe-redis:
+        condition: service_healthy
+    environment:
+      DB_CONNECTION: pgsql
+      DB_HOST: porto-unsafe-db
+      DB_PORT: 5432
+      DB_DATABASE: porto-unsafe
+      DB_USERNAME: root
+      DB_PASSWORD: root
+
+      QUEUE_CONNECTION: redis
+
+      CACHE_STORE: redis
+      SESSION_DRIVER: redis
+      SESSION_CONNECTION: default
+
+      REDIS_HOST: porto-unsafe-redis
+      REDIS_PORT: 6379
+    networks:
+      - porto-unsafe-network
+
+volumes:
+  porto-unsafe-db-data:
+    name: porto-unsafe-db-data
+
+networks:
+  porto-unsafe-network:
+    name: porto-unsafe-network
+    driver: bridge
+
