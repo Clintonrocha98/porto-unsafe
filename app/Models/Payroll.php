@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\Entity;
 use Illuminate\Database\Eloquent\Model;
 
 class Payroll extends Model
@@ -30,6 +31,7 @@ class Payroll extends Model
     protected function casts(): array
     {
         return [
+            'entity' => Entity::class,
             'admission_date' => 'date',
             'resignation_date' => 'date',
             'workload_hours' => 'integer',

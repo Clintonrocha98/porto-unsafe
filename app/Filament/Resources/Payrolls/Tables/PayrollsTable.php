@@ -13,7 +13,7 @@ class PayrollsTable
     {
         return $table
             ->columns([
-                TextColumn::make('entity')->label(__('validation.attributes.entity'))->searchable(),
+                TextColumn::make('entity')->label(__('validation.attributes.entity'))->searchable()->formatStateUsing(fn ($state): string => $state instanceof \App\Enums\Entity ? $state->getLabel() : $state),
                 TextColumn::make('registration')->label(__('validation.attributes.registration'))->searchable(),
                 TextColumn::make('name')->label(__('validation.attributes.name'))->searchable(),
                 TextColumn::make('role')->label(__('validation.attributes.role'))->searchable(),
