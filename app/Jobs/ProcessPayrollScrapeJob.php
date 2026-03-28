@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Models\Payroll;
 use App\Services\Scraping\PayrollScraperService;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -33,10 +34,20 @@ class ProcessPayrollScrapeJob implements ShouldQueue
             return;
         }
 
-        $dtos = $scraper->scrape($this->entity, $this->month, $this->year, $this->regime);
+        $records = [];
 
-        foreach ($dtos as $dto) {
-            $this->batch()->add(new SavePayrollRecordJob($this->entity, $dto));
+        foreach ($scraper->scrape($this->entity, $this->month, $this->year, $this->regime) as $dto) {
+            $records[] = ['entity' => $this->entity, ...$dto->toArray()];
         }
+
+        if ($records === []) {
+            return;
+        }
+
+        Payroll::query()->upsert($records, ['entity', 'registration', 'role', 'month', 'year'], [
+            'name', 'admission_date', 'resignation_date',
+            'employment_regime', 'workplace', 'workload_hours',
+            'base_salary', 'allowances', 'deductions', 'taxes', 'net_salary',
+        ]);
     }
 }

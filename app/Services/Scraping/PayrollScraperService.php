@@ -9,15 +9,14 @@ use App\Parsers\PayrollParser;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
-use Generator;
 use Illuminate\Support\Facades\Http;
 
 class PayrollScraperService
 {
     /**
-     * @return Generator<int, PayrollDTO>
+     * @return array<int, PayrollDTO>
      */
-    public function scrape(string $entity, int $month, int $year, int $regime): Generator
+    public function scrape(string $entity, int $month, int $year, int $regime): array
     {
         $response = Http::timeout(30)
             ->withHeaders([
@@ -44,19 +43,22 @@ class PayrollScraperService
         $xpath = new DOMXPath($dom);
         $nodes = $xpath->query('//tbody/tr');
 
+        $records = [];
+
         if ($nodes) {
             foreach ($nodes as $node) {
                 if (! ($node instanceof DOMElement)) {
                     continue;
                 }
 
-                // If row says "Nenhum registro encontrado" or similar, it might be a single td
                 if ($node->getElementsByTagName('td')->length < 13) {
-                    continue; // skip invalid or empty rows
+                    continue;
                 }
 
-                yield PayrollParser::parseRow($node, $month, $year);
+                $records[] = PayrollParser::parseRow($node, $month, $year);
             }
         }
+
+        return $records;
     }
 }

@@ -19,7 +19,7 @@ class PayrollParser
 
     private const array INT_FIELDS = [7, 13, 14];
 
-    public static function clean(string $value, int $index): string
+    public static function clean(string $value, int $index): string|float
     {
         $value = self::normalize($value);
 
@@ -113,11 +113,11 @@ class PayrollParser
         return $date->format('Y-m-d');
     }
 
-    private static function cleanMoney(string $value): string
+    private static function cleanMoney(string $value): float
     {
         $value = str_replace('.', '', $value);
 
-        return str_replace(',', '.', $value);
+        return (float) str_replace(',', '.', $value);
     }
 
     private static function cleanInt(string $value): string
