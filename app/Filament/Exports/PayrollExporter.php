@@ -29,15 +29,15 @@ class PayrollExporter extends Exporter
             ExportColumn::make('workplace')->label(__('validation.attributes.workplace')),
             ExportColumn::make('workload_hours')->label(__('validation.attributes.workload_hours')),
             ExportColumn::make('base_salary')->label(__('validation.attributes.base_salary'))
-                ->formatStateUsing(fn (Payroll $record): string => Number::currency($record->base_salary ?? 0, 'BRL')),
+                ->formatStateUsing(fn (Payroll $record): string => Number::currency((float) ($record->base_salary ?? 0), 'BRL')),
             ExportColumn::make('allowances')->label(__('validation.attributes.allowances'))
-                ->formatStateUsing(fn (Payroll $record): string => Number::currency($record->allowances ?? 0, 'BRL')),
+                ->formatStateUsing(fn (Payroll $record): string => Number::currency((float) ($record->allowances ?? 0), 'BRL')),
             ExportColumn::make('deductions')->label(__('validation.attributes.deductions'))
-                ->formatStateUsing(fn (Payroll $record): string => Number::currency($record->deductions ?? 0, 'BRL')),
+                ->formatStateUsing(fn (Payroll $record): string => Number::currency((float) ($record->deductions ?? 0), 'BRL')),
             ExportColumn::make('taxes')->label(__('validation.attributes.taxes'))
-                ->formatStateUsing(fn (Payroll $record): string => Number::currency($record->taxes ?? 0, 'BRL')),
+                ->formatStateUsing(fn (Payroll $record): string => Number::currency((float) ($record->taxes ?? 0), 'BRL')),
             ExportColumn::make('net_salary')->label(__('validation.attributes.net_salary'))
-                ->formatStateUsing(fn (Payroll $record): string => Number::currency($record->net_salary ?? 0, 'BRL')),
+                ->formatStateUsing(fn (Payroll $record): string => Number::currency((float) ($record->net_salary ?? 0), 'BRL')),
             ExportColumn::make('month')->label(__('validation.attributes.month')),
             ExportColumn::make('year')->label(__('validation.attributes.year')),
         ];

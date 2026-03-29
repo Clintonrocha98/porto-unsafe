@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Enums\MunicipalDepartment;
 use App\Models\Payroll;
 use App\Services\Scraping\PayrollScraperService;
 use Illuminate\Bus\Batchable;
@@ -22,7 +23,7 @@ class ProcessPayrollScrapeJob implements ShouldQueue
     use SerializesModels;
 
     public function __construct(
-        public string $entity,
+        public MunicipalDepartment $entity,
         public int $month,
         public int $year,
         public int $regime
@@ -36,15 +37,17 @@ class ProcessPayrollScrapeJob implements ShouldQueue
 
         $records = [];
 
-        foreach ($scraper->scrape($this->entity, $this->month, $this->year, $this->regime) as $dto) {
-            $records[] = ['entity' => $this->entity, ...$dto->toArray()];
+        foreach ($scraper->scrape($this->entity->value, $this->month, $this->year, $this->regime) as $dto) {
+            $record = ['entity' => $this->entity->value, ...$dto->toArray()];
+            $key = implode('|', [$this->entity->value, $record['registration'], $record['role'], $record['month'], $record['year']]);
+            $records[$key] = $record;
         }
 
         if ($records === []) {
             return;
         }
 
-        Payroll::query()->upsert($records, ['entity', 'registration', 'role', 'month', 'year'], [
+        Payroll::query()->upsert(array_values($records), ['entity', 'registration', 'role', 'month', 'year'], [
             'name', 'admission_date', 'resignation_date',
             'employment_regime', 'workplace', 'workload_hours',
             'base_salary', 'allowances', 'deductions', 'taxes', 'net_salary',

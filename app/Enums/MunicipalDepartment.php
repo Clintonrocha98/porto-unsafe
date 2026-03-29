@@ -6,7 +6,7 @@ namespace App\Enums;
 
 use Filament\Support\Contracts\HasLabel;
 
-enum Entity: string implements HasLabel
+enum MunicipalDepartment: string implements HasLabel
 {
     case Administracao = 'pm_portoseguro';
     case Educacao = 'educ_portoseguro';
@@ -15,9 +15,9 @@ enum Entity: string implements HasLabel
     public function getLabel(): ?string
     {
         return match ($this) {
-            Entity::Administracao => 'Administração',
-            Entity::Educacao => 'Educação',
-            Entity::Saude => 'Saúde',
+            MunicipalDepartment::Administracao => 'Administração',
+            MunicipalDepartment::Educacao => 'Educação',
+            MunicipalDepartment::Saude => 'Saúde',
         };
     }
 }

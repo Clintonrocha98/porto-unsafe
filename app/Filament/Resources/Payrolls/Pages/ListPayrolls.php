@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Payrolls\Pages;
 
-use App\Enums\Entity;
+use App\Enums\MunicipalDepartment;
 use App\Filament\Exports\PayrollExporter;
 use App\Filament\Resources\Payrolls\PayrollResource;
 use App\Jobs\ProcessPayrollScrapeJob;
@@ -56,9 +56,9 @@ class ListPayrolls extends ListRecords
                     Flex::make([
                         Select::make('entity')
                             ->label(__('validation.attributes.entity'))
-                            ->options(Entity::class)
+                            ->options(MunicipalDepartment::class)
                             ->required()
-                            ->default(Entity::Administracao->value)
+                            ->default(MunicipalDepartment::Administracao->value)
                             ->live(),
                         Select::make('year')
                             ->label(__('validation.attributes.year'))
