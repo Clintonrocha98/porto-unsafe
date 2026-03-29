@@ -29,3 +29,5 @@ CLAUDE.md
 opencode.json
 .ai
 .pint.result.cache
+.github/skills
+.rector.result.cache
