@@ -1,6 +1,6 @@
 # porto-unsafe
 
-> Scraper de folha de pagamento pública da Prefeitura de Porto Seguro com painel administrativo para visualização, pesquisa e exportação dos dados.
+> Plataforma de transparência pública da Prefeitura de Porto Seguro: coleta, armazena e expõe dados de folha de pagamento e despesas municipais via scraping assíncrono com painel administrativo para visualização, pesquisa e exportação.
 
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?logo=php&logoColor=white)
 ![Laravel](https://img.shields.io/badge/Laravel-12-FF2D20?logo=laravel&logoColor=white)
@@ -13,29 +13,42 @@
 
 ## Visão Geral
 
-O **porto-unsafe** coleta dados da folha de pagamento pública de entidades municipais através do portal de transparência [transparencia.fatorsistemas.com.br](https://transparencia.fatorsistemas.com.br). O processo é assíncrono, baseado em filas, e os dados coletados ficam disponíveis em um painel administrativo com suporte a busca, ordenação e exportação.
+O **porto-unsafe** coleta dados públicos de entidades municipais de Porto Seguro a partir de dois portais de transparência. O processo é assíncrono, baseado em filas Redis, e os dados coletados ficam disponíveis em um painel administrativo com suporte a busca, ordenação e exportação.
 
 A origem do nome refere-se à cidade de **Porto Seguro** e ao caráter de extração não-oficial dos dados (`unsafe`), que são públicos mas acessados via scraping HTML.
 
 ---
 
-## Fonte dos Dados
+## Fontes de Dados
+
+### Folha de Pagamento
 
 | Atributo | Valor |
 |---|---|
 | Portal | Transparência Fator Sistemas |
 | URL base | `https://transparencia.fatorsistemas.com.br/dados/carregaFolha.php` |
-| Entidade padrão | `pm_portoseguro` (Prefeitura Municipal de Porto Seguro) |
+| Entidades coletadas | `pm_portoseguro`, `educ_portoseguro`, `saude_portoseguro` |
 | Regimes coletados | 3 regimes por período (CLT, Estatutário e outros) |
-| Período selecionável | Mês e ano, com janela de 5 anos |
+| Período selecionável | A partir de março/2024, com filtro por entidade |
 
-Os dados são públicos e dizem respeito a servidores municipais ativos e inativos, incluindo informações salariais e funcionais.
+### Despesas Municipais
+
+| Atributo | Valor |
+|---|---|
+| Portal | Município Online |
+| URL base | `https://www.municipioonline.com.br/ba/prefeitura/portoseguro/cidadao/despesa` |
+| Tipos de despesa | 6 categorias via `ExpenseType` enum |
+| Período selecionável | Mês e ano |
+
+Os dados são públicos e dizem respeito a servidores municipais e movimentações orçamentárias da prefeitura.
 
 ---
 
 ## Dados Extraídos
 
-Cada registro de folha de pagamento contém os seguintes campos:
+### Folha de Pagamento
+
+Cada registro da tabela `payrolls` contém:
 
 | Campo | Tipo | Descrição |
 |---|---|---|
@@ -58,94 +71,149 @@ Cada registro de folha de pagamento contém os seguintes campos:
 
 A chave única de cada registro é composta por `(entity, registration, role, month, year)`, permitindo upserts seguros para re-execuções.
 
+### Despesas Municipais
+
+Cada registro da tabela `expense_summaries` contém:
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `expense_type` | string (enum) | Categoria da despesa (ex: `empenhos`) |
+| `expense_date` | date | Data do empenho/liquidação/pagamento |
+| `empenho_number` | string | Número do empenho |
+| `element_code` | string | Código do elemento de despesa |
+| `element_description` | string | Descrição do elemento |
+| `creditor` | string | Nome do credor |
+| `creditor_document` | string | CPF/CNPJ do credor |
+| `committed` | decimal | Valor empenhado (R$) |
+| `annulled` | decimal | Valor anulado (R$) |
+| `reinforced` | decimal | Valor reforçado (R$) |
+| `liquidated` | decimal | Valor liquidado (R$) |
+| `paid` | decimal | Valor pago (R$) |
+| `bidding_modality` | string\|null | Modalidade de licitação |
+| `process_number` | string\|null | Número do processo |
+| `month` | integer | Mês de referência |
+| `year` | integer | Ano de referência |
+
+A chave única é composta por `(expense_type, empenho_number, year)`.
+
+### Enum `ExpenseType`
+
+| Case | Valor | Label |
+|---|---|---|
+| `ResumoOrcamentario` | `resumo_orcamentario` | Resumo Orçamentário |
+| `Empenhos` | `empenhos` | Empenhos |
+| `Liquidacoes` | `liquidacoes` | Liquidações |
+| `Pagamentos` | `pagamentos` | Pagamentos |
+| `ExtraOrcamentario` | `extra_orcamentario` | Extra Orçamentário |
+| `RepasseFinanceiro` | `repasse_financeiro` | Repasse Financeiro |
+
+### Enum `MunicipalDepartment`
+
+| Case | Valor | Label |
+|---|---|---|
+| `Administracao` | `pm_portoseguro` | Administração |
+| `Educacao` | `educ_portoseguro` | Educação |
+| `Saude` | `saude_portoseguro` | Saúde |
+
 ---
 
 ## Arquitetura
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                 Filament Admin Panel                    │
-│ /admin (autenticação obrigatória)                       │
-│                                                         │
-│  ┌──────────────────────┐  ┌──────────────────────────┐ │
-│  │   PayrollResource    │  │   ListPayrolls (Page)    │ │
-│  │   (tabela, busca)    │  │  ┌────────────────────┐  │ │
-│  │                      │  │  │ Ação: Iniciar      │  │ │
-│  │                      │  │  │ Extração           │  │ │
-│  │                      │  │  ├────────────────────┤  │ │
-│  │                      │  │  │ Ação: Histórico    │  │ │
-│  │                      │  │  ├────────────────────┤  │ │
-│  │                      │  │  │ Ação: Exportar     │  │ │
-│  │                      │  │  └────────────────────┘  │ │
-│  └──────────────────────┘  └──────────────────────────┘ │
-└──────────────────────────────┬──────────────────────────┘
-                               │ Bus::batch()
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│                 Laravel Queue (Redis)                  │
-│                                                         │
-│  ProcessPayrollScrapeJob  ──►  SavePayrollRecordJob     │
-│  (por regime: 1, 2, 3)        (por registro)            │
-└──────────────────────────────┬──────────────────────────┘
-                               │ HTTP GET
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│    transparencia.fatorsistemas.com.br                   │
-│    /dados/carregaFolha.php?id=...&mes=...&ano=...       │
-└──────────────────────────────┬──────────────────────────┘
-                               │ HTML response
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│ PayrollScraperService (DOMDocument + DOMXPath)          │
-│ PayrollParser (normalização de encoding e valores)      │
-│ PayrollDTO (objeto de transferência)                    │
-└──────────────────────────────┬──────────────────────────┘
-                               │ Upsert
-                               ▼
-┌─────────────────────────────────────────────────────────┐
-│        PostgreSQL — tabela payrolls                     │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                      Filament Admin Panel                            │
+│  /admin (autenticação obrigatória)                                   │
+│                                                                      │
+│  ┌─────────────────────────────┐  ┌──────────────────────────────┐   │
+│  │   PayrollResource           │  │   ExpenseSummaryResource     │   │
+│  │   (tabela, busca, exportar) │  │   (abas por ExpenseType)     │   │
+│  │   Ação: Iniciar Extração    │  │   Ação: Iniciar Extração     │   │
+│  └──────────────┬──────────────┘  └──────────────┬───────────────┘   │
+└─────────────────┼────────────────────────────────┼───────────────────┘
+                  │ Bus::batch()                    │ Bus::batch()
+                  ▼                                 ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      Laravel Queue (Redis)                           │
+│                                                                      │
+│   ProcessPayrollScrapeJob          ProcessExpenseScrapeJob           │
+│   (por regime: 1, 2, 3)            (por ExpenseType)                 │
+└──────────────────┬─────────────────────────────┬─────────────────────┘
+                   │ HTTP GET                     │ HTTP POST (ASP.NET)
+                   ▼                              ▼
+┌──────────────────────────────┐   ┌─────────────────────────────────┐
+│  transparencia.fatorsistemas │   │  municipioonline.com.br         │
+│  .com.br/dados/carregaFolha  │   │  /cidadao/despesa               │
+└──────────────┬───────────────┘   └──────────────┬──────────────────┘
+               │ HTML                              │ HTML
+               ▼                                  ▼
+┌──────────────────────────────┐   ┌─────────────────────────────────┐
+│  PayrollScraperService       │   │  ExpenseSummaryScraperService   │
+│  PayrollParser               │   │  ExpenseSummaryParser           │
+│  PayrollDTO                  │   │  ExpenseSummaryDTO              │
+│                              │   │                                 │
+│  └── HtmlTableParser ───────►│   │  └── HtmlTableParser ──────────►│
+└──────────────┬───────────────┘   └──────────────┬──────────────────┘
+               │ Upsert                            │ Upsert
+               ▼                                  ▼
+┌──────────────────────────────┐   ┌─────────────────────────────────┐
+│  PostgreSQL — payrolls       │   │  PostgreSQL — expense_summaries │
+└──────────────────────────────┘   └─────────────────────────────────┘
 ```
 
 ### Componentes Principais
 
+#### Folha de Pagamento
+
 | Componente | Localização | Responsabilidade |
 |---|---|---|
-| `PayrollScraperService` | `app/Services/Scraping/` | Requisição HTTP e parse do HTML via DOMXPath |
+| `PayrollScraperService` | `app/Services/Scraping/` | Requisição HTTP GET e parse do HTML via HtmlTableParser |
 | `PayrollParser` | `app/Parsers/` | Limpeza e normalização dos valores (encoding, datas, moeda) |
 | `PayrollDTO` | `app/DTO/` | Objeto de transferência entre scraper e banco |
-| `ProcessPayrollScrapeJob` | `app/Jobs/` | Job de fila que orquestra o scraping por regime |
-| `SavePayrollRecordJob` | `app/Jobs/` | Job de fila que persiste cada registro via upsert |
+| `ProcessPayrollScrapeJob` | `app/Jobs/` | Job de fila que orquestra o scraping por regime (1, 2, 3) |
 | `PayrollResource` | `app/Filament/Resources/` | Resource Filament com tabela, filtros e ações |
 | `PayrollExporter` | `app/Filament/Exports/` | Exportação CSV/XLSX via Filament Actions |
 | `PayrollScrapeProgressWidget` | `app/Filament/Resources/Payrolls/Widgets/` | Widget de progresso com polling a cada 2s |
+
+#### Despesas Municipais
+
+| Componente | Localização | Responsabilidade |
+|---|---|---|
+| `ExpenseSummaryScraperService` | `app/Services/Scraping/` | Requisição HTTP POST (ASP.NET WebForms) e parse via HtmlTableParser |
+| `ExpenseSummaryParser` | `app/Parsers/` | Normalização de valores monetários e strings |
+| `ExpenseSummaryDTO` | `app/DTO/` | Objeto de transferência entre scraper e banco |
+| `ProcessExpenseScrapeJob` | `app/Jobs/` | Job de fila que orquestra o scraping por `ExpenseType` |
+| `ExpenseSummaryResource` | `app/Filament/Resources/` | Resource Filament com abas por tipo de despesa |
+
+#### Utilitários Compartilhados
+
+| Componente | Localização | Responsabilidade |
+|---|---|---|
+| `HtmlTableParser` | `app/Parsers/` | Extração de linhas de tabelas HTML via DOMDocument/DOMXPath (injetável, mockável) |
+| `MunicipalDepartment` | `app/Enums/` | Enum de departamentos municipais (`Administracao`, `Educacao`, `Saude`) |
+| `ExpenseType` | `app/Enums/` | Enum das 6 categorias de despesa com `anchor()` e `formKey()` |
 
 ---
 
 ## Fluxo do Usuário
 
+### Folha de Pagamento
+
 ```
 USER (Admin)                              SYSTEM
   │                                           │
-  │  👆 Acessa http://localhost:8000/admin    │
+  │  👆 Acessa /admin/payrolls                │
   │ ─────────────────────────────────────►    │
   │                                           │  AdminPanelProvider: auth=Filament
-  │    Tela de login                          │  middleware: Authenticate
-  │ ◄─────────────────────────────────────────│
-  │                                           │
-  │  👆 Autentica com e-mail e senha          │
-  │ ─────────────────────────────────────►    │
-  │                                           │  Login: validation: ✓
-  │    "Painel de Folhas de Pagamento"        │
+  │    Tabela de Folhas de Pagamento          │
   │ ◄─────────────────────────────────────────│
   │                                           │
   │  👆 Clica em "Iniciar Extração"           │
   │ ─────────────────────────────────────►    │
   │                                           │  ListPayrolls: action=start_scrape
   │    ┌──────────────────────────────┐       │  (desabilitado se já houver batch ativo)
-  │    │ Entidade: pm_portoseguro     │       │
-  │    │ Mês:      [select 1–12]      │       │
-  │    │ Ano:      [select últimos 5] │       │
+  │    │ Entidade: [Administração ▼]  │       │
+  │    │ Mês:      [select dinâmico]  │       │  filtra meses já extraídos por entidade/ano
+  │    │ Ano:      [select 2024–...] │       │
   │    └──────────────────────────────┘       │
   │ ◄─────────────────────────────────────────│
   │                                           │
@@ -163,19 +231,9 @@ USER (Admin)                              SYSTEM
   │                       [background queue]  │
   │                                           │  ProcessPayrollScrapeJob:
   │                                           │  ⚙️ HTTP GET carregaFolha.php
-  │                                           │  ⚙️ DOMXPath → PayrollParser
-  │                                           │  ⚙️ yield PayrollDTO[]
-  │                                           │  ⚙️ → SavePayrollRecordJob (upsert)
-  │                                           │
-  │  👆 Clica em "Histórico"                 │
-  │ ─────────────────────────────────────►    │
-  │                                           │  PayrollScrapeProgressWidget
-  │    ┌────────────────────────────────┐     │  wire:poll.2s → job_batches
-  │    │ Payroll Scrape: 3/2025         │     │  data: {pending, total, failed}
-  │    │ ████████████░░░░░░ 65%         │     │
-  │    │ Processando: 130 de 200        │     │
-  │    └────────────────────────────────┘     │
-  │ ◄─────────────────────────────────────────│
+  │                                           │  ⚙️ HtmlTableParser → PayrollParser
+  │                                           │  ⚙️ Deduplicação por chave composta
+  │                                           │  ⚙️ Payroll::upsert() → payrolls
   │                                           │
   │    🔔 "Scraping Finalizado               │
   │        mês 3/2025 concluído"             │
@@ -183,7 +241,7 @@ USER (Admin)                              SYSTEM
   │                                           │
   │  👆 Busca por nome ou matrícula           │
   │ ─────────────────────────────────────►    │
-  │                                           │  PayrollsTable: searchable columns
+  │                                           │  PayrollsTable: colunas pesquisáveis
   │    Tabela com resultados filtrados        │  (entity, registration, name, role, regime)
   │ ◄─────────────────────────────────────────│
   │                                           │
@@ -192,6 +250,57 @@ USER (Admin)                              SYSTEM
   │                                           │  PayrollExporter: CSV/XLSX
   │    📥 Download do arquivo                 │  🔔 Notificação ao concluir
   │ ◄─────────────────────────────────────────│
+```
+
+### Despesas Municipais
+
+```
+USER (Admin)                              SYSTEM
+  │                                           │
+  │  👆 Acessa /admin/expense-summaries       │
+  │ ─────────────────────────────────────►    │
+  │                                           │  ExpenseSummaryResource: view=blade
+  │    ┌─────────────────────────────┐        │  ListExpenseSummaries::getTableQuery()
+  │    │ Resumo │ Empenhos │ Liquid. │        │  filtra por activeType (Livewire)
+  │    │ Pagam. │ Extra    │ Repasse │        │
+  │    └─────────────────────────────┘        │
+  │    Tabela de despesas da aba ativa        │
+  │ ◄─────────────────────────────────────────│
+  │                                           │
+  │  👆 Clica em outra aba                    │
+  │ ─────────────────────────────────────►    │
+  │                                           │  Livewire: $set('activeType', value)
+  │    Tabela recarrega com novo tipo         │  getTableQuery() → WHERE expense_type=...
+  │ ◄─────────────────────────────────────────│
+  │                                           │
+  │  👆 Clica em "Iniciar Extração"           │
+  │ ─────────────────────────────────────►    │
+  │                                           │  ListExpenseSummaries: action=start_scrape
+  │    ┌──────────────────────────────┐       │
+  │    │ Tipo: [Empenhos ▼]           │       │
+  │    │ Mês:  [select 1–12]          │       │
+  │    │ Ano:  [select 2024–...]      │       │
+  │    └──────────────────────────────┘       │
+  │ ◄─────────────────────────────────────────│
+  │                                           │
+  │  👆 Confirma                              │
+  │ ─────────────────────────────────────►    │
+  │                                           │  Bus::batch([
+  │                                           │    ProcessExpenseScrapeJob(type, year, month)
+  │                                           │  ])->dispatch()
+  │    🔔 "Extração iniciada em               │
+  │        segundo plano"                     │
+  │ ◄─────────────────────────────────────────│
+  │                                           │
+  │                       [background queue]  │
+  │                                           │  ProcessExpenseScrapeJob:
+  │                                           │  ⚙️ HTTP POST (ASP.NET) + CookieJar
+  │                                           │  ⚙️ HtmlTableParser → ExpenseSummaryParser
+  │                                           │  ⚙️ Deduplicação por chave composta
+  │                                           │  ⚙️ ExpenseSummary::upsert()
+  │                                           │
+  │    🔔 "Extração Finalizada"              │
+  │ ◄─────────────────────────────────────────│  Batch::then() → Notification (DB)
 ```
 
 ---
@@ -365,25 +474,29 @@ php artisan test --compact --filter=NomeDoTeste
 
 Rota: `/admin` (autenticação obrigatória)
 
-### Funcionalidades
+### Folha de Pagamento — `/admin/payrolls`
 
 | Funcionalidade | Descrição |
 |---|---|
 | **Listagem** | Tabela paginada com todas as folhas coletadas |
 | **Busca** | Pesquisa por entidade, matrícula, nome, cargo e regime |
 | **Ordenação** | Colunas de salários, mês e ano são ordenáveis |
-| **Iniciar Extração** | Formulário para disparar scraping de um período específico |
-| **Histórico** | Slide-over com progresso em tempo real (polling 2s) via Livewire |
+| **Iniciar Extração** | Formulário para disparar scraping com seletor de entidade, mês (filtra já extraídos) e ano |
 | **Exportação** | Download CSV/XLSX com todos os campos formatados em BRL |
-| **Notificações** | Alerta ao usuário quando o scraping é concluído (notificação no banco) |
+| **Notificações** | Alerta no banco quando o scraping é concluído |
 
-### Colunas Visíveis por Padrão
+**Colunas visíveis por padrão:** Entidade, Matrícula, Nome, Cargo, Regime de Emprego, Salário Líquido, Mês, Ano
 
-- Entidade, Matrícula, Nome, Cargo, Regime de Emprego, Salário Líquido, Mês, Ano
+**Colunas toggleáveis (ocultas por padrão):** Data de Admissão, Salário Base, Vantagens, Descontos, Impostos
 
-### Colunas Toggleáveis (ocultas por padrão)
+### Despesas Municipais — `/admin/expense-summaries`
 
-- Data de Admissão, Salário Base, Vantagens, Descontos, Impostos
+| Funcionalidade | Descrição |
+|---|---|
+| **Abas por categoria** | 6 abas (Resumo Orçamentário, Empenhos, Liquidações, Pagamentos, Extra Orçamentário, Repasse Financeiro) com tabela reativa via Livewire |
+| **Listagem** | Tabela paginada filtrada pelo tipo da aba ativa |
+| **Iniciar Extração** | Formulário com seletor de tipo, mês e ano |
+| **Notificações** | Alerta no banco quando o scraping é concluído |
 
 ---
 
