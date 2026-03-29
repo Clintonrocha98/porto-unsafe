@@ -31,3 +31,6 @@ opencode.json
 /.pint.result.cache
 /.github/skills/
 /.rector.result.cache/
+/public/css
+/public/fonts
+/public/js
